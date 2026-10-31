@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>吉他調音器｜Guitar Tuner</title>
+<meta name="description" content="免費網頁版吉他調音器：麥克風即時偵測音高、偏差指示、多種調弦法、參考音播放。全部在本機運算，不上傳任何聲音。">
+<meta name="theme-color" content="#101418">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root{
+    --bg:#101418; --card:#1a2129; --card2:#232d38; --line:#2e3a47;
+    --text:#eef3f7; --dim:#93a5b5; --amber:#f5b544; --green:#3ddc84;
+    --red:#ff6b6b; --blue:#57b6ff;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif;
+    min-height:100dvh; display:flex; flex-direction:column; align-items:center;
+    padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 20px);
+  }
+  header{width:100%; max-width:520px; display:flex; align-items:center; gap:10px;}
+  header .logo{font-size:26px;}
+  header h1{font-size:19px; margin:0; font-weight:700; letter-spacing:.5px;}
+  header .ver{margin-left:auto; color:var(--dim); font-size:12px;}
+  main{width:100%; max-width:520px; display:flex; flex-direction:column; gap:14px; margin-top:12px;}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px;}
+  .row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  label{color:var(--dim); font-size:13px;}
+  select,button{
+    font:inherit; color:var(--text); background:var(--card2);
+    border:1px solid var(--line); border-radius:12px; padding:9px 12px;
+  }
+  select{flex:1; min-width:150px;}
+  button{cursor:pointer;}
+  button:active{transform:scale(.97);}
+
+  /* ---- meter ---- */
+  #displayCard{text-align:center; padding:20px 16px 14px; position:relative; overflow:hidden;}
+  #noteName{font-size:92px; line-height:1; font-weight:800; letter-spacing:1px; margin:2px 0 0;}
+  #noteName .oct{font-size:34px; color:var(--dim); font-weight:600;}
+  #freqLine{color:var(--dim); font-size:15px; margin-top:6px; min-height:20px;}
+  #verdict{font-size:17px; font-weight:700; min-height:24px; margin-top:2px;}
+  #verdict.flat{color:var(--blue);} #verdict.sharp{color:var(--red);} #verdict.good{color:var(--green);}
+  #gaugeWrap{margin:14px auto 2px; width:100%; max-width:420px;}
+  canvas#gauge{width:100%; height:110px; display:block;}
+  #centsLine{font-size:14px; color:var(--dim); min-height:18px;}
+  #inTuneBadge{
+    display:none; margin:10px auto 2px; width:fit-content; padding:5px 16px; border-radius:999px;
+    background:rgba(61,220,132,.14); color:var(--green); border:1px solid var(--green); font-weight:700; font-size:14px;
+  }
+  #levelWrap{height:6px; background:var(--card2); border-radius:3px; overflow:hidden; margin-top:12px;}
+  #levelBar{height:100%; width:0%; background:var(--amber); transition:width .06s linear;}
+
+  #startBtn{
+    width:100%; padding:15px; font-size:18px; font-weight:700; border-radius:14px;
+    background:var(--amber); color:#1a1405; border:none;
+  }
+  #startBtn.listening{background:var(--card2); color:var(--text); border:1px solid var(--line);}
+  #hint{color:var(--dim); font-size:13px; text-align:center; min-height:18px; margin:0;}
+
+  /* ---- strings ---- */
+  #strings{display:grid; grid-template-columns:repeat(6,1fr); gap:8px;}
+  .strBtn{
+    display:flex; flex-direction:column; align-items:center; gap:1px; padding:10px 2px 8px; border-radius:14px;
+  }
+  .strBtn .sNote{font-size:19px; font-weight:800;}
+  .strBtn .sNum{font-size:11px; color:var(--dim);}
+  .strBtn .sHz{font-size:10px; color:var(--dim);}
+  .strBtn.nearest{border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset;}
+  .strBtn.locked{background:var(--amber); color:#1a1405;}
+  .strBtn.locked .sNum,.strBtn.locked .sHz{color:#5c4a12;}
+  .strBtn.tuned{border-color:var(--green); box-shadow:0 0 0 1px var(--green) inset;}
+  .mini{font-size:12px; color:var(--dim); padding:7px 10px;}
+
+  input[type=range]{flex:1; accent-color:var(--amber);}
+  #a4Val{font-variant-numeric:tabular-nums; min-width:64px; text-align:right;}
+  .foot{color:var(--dim); font-size:12px; line-height:1.7; text-align:center; margin-top:2px;}
+  .foot b{color:var(--text);}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎸</div>
+  <h1>吉他調音器</h1>
+  <div class="ver">v1.0</div>
+</header>
+
+<main>
+  <div class="card" id="displayCard">
+    <div id="noteName">—<span class="oct"></span></div>
+    <div id="freqLine">按下開始，撥一根弦</div>
+    <div id="verdict"></div>
+    <div id="gaugeWrap"><canvas id="gauge" width="840" height="220"></canvas></div>
+    <div id="centsLine">偏差 — cents</div>
+    <div id="inTuneBadge">✓ 音準了</div>
+    <div id="levelWrap"><div id="levelBar"></div></div>
+  </div>
+
+  <button id="startBtn">🎤 開始調音</button>
+  <p id="hint">聲音只在這支手機上運算，不會上傳。</p>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:12px;">
+      <label for="tuningSel">調弦法</label>
+      <select id="tuningSel"></select>
+      <button class="mini" id="autoBtn">自動偵測弦：開</button>
+    </div>
+    <div id="strings"></div>
+    <p class="foot" style="text-align:left; margin:10px 0 0;">點任一根弦：鎖定目標並播放參考音。撥弦後，亮框的是偵測到最接近的那根弦；調準了該弦會變綠。</p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label for="a4Range">基準音 A4</label>
+      <input type="range" id="a4Range" min="430" max="450" step="1" value="440">
+      <span id="a4Val">440 Hz</span>
+    </div>
+  </div>
+
+  <p class="foot">使用方式：安靜環境下把手機靠近音孔（或電吉他音箱），<b>一次撥一根弦</b>，讓聲音自然衰減，照指示轉弦鈕——偏低（藍）往緊、偏高（紅）放鬆，綠色 ±5 cents 內就算調準。<br>全在本機以 Web Audio 運算，無伺服器、無帳號、離線可用。</p>
+</main>
+
+<script>
+'use strict';
+/* ============================================================
+   吉他調音器 Guitar Tuner — 零依賴、全部本機運算
+   音高偵測：自相關法（autocorrelation）＋拋物線插值
+   參考作法：cwilso/PitchDetect（MIT）的 ACF 思路，自行實作
+   ============================================================ */
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const TUNINGS = {
+  standard: { label:'標準調弦 E A D G B E',        strings:['E2','A2','D3','G3','B3','E4'] },
+  dropd:    { label:'Drop D（第6弦降全音）',        strings:['D2','A2','D3','G3','B3','E4'] },
+  eb:       { label:'半音降低 Eb Ab Db Gb Bb Eb',  strings:['Eb2','Ab2','Db3','Gb3','Bb3','Eb4'] },
+  openg:    { label:'Open G（D G D G B D）',        strings:['D2','G2','D3','G3','B3','D4'] },
+  dadgad:   { label:'DADGAD（D A D G A D）',        strings:['D2','A2','D3','G3','A3','D4'] },
+  bass4:    { label:'貝斯四弦 E A D G',             strings:['E1','A1','D2','G2'] },
+};
+
+let A4 = 440;
+function noteToMidi(name){
+  const m = /^([A-G]#?|Eb|Ab|Db|Gb|Bb)(-?\d)$/.exec(name);
+  if(!m) return null;
+  const flatMap = {Eb:'D#', Ab:'G#', Db:'C#', Gb:'F#', Bb:'A#'};
+  const n = flatMap[m[1]] || m[1];
+  return NOTE_NAMES.indexOf(n) + (parseInt(m[2],10)+1)*12;
+}
+function midiToFreq(midi){ return A4 * Math.pow(2,(midi-69)/12); }
+function freqToMidi(f){ return 69 + 12*Math.log2(f/A4); }
+
+/* ---------- 狀態 ---------- */
+let audioCtx=null, analyser=null, micStream=null, rafId=null;
+let listening=false, autoString=true, lockedIdx=null; // lockedIdx: 0=第6弦(最低音) … 由左至右
+let currentTuning='standard';
+let smoothedFreq=null, lastValidAt=0, stableNote=null, stableCount=0;
+const buf = new Float32Array(4096);
+
+/* ---------- 音高偵測：自相關（lag 限制在 35–600 Hz，只算需要的範圍） ---------- */
+function autoCorrelate(buf, sampleRate){
+  const SIZE = buf.length;
+  let rms = 0;
+  for(let i=0;i<SIZE;i++){ const v=buf[i]; rms += v*v; }
+  rms = Math.sqrt(rms/SIZE);
+  if(rms < 0.012) return {freq:-1, rms};           // 太安靜
+  // 去掉頭尾低能量段，減少誤判
+  let r1=0, r2=SIZE-1; const th=0.2;
+  for(let i=0;i<SIZE/2;i++){ if(Math.abs(buf[i])<th){ r1=i; } else break; }
+  for(let i=1;i<SIZE/2;i++){ if(Math.abs(buf[SIZE-i])<th){ r2=SIZE-i; } else break; }
+  const b = buf.slice(r1, r2);
+  const N = b.length;
+  if(N < 512) return {freq:-1, rms};
+  const minLag = Math.floor(sampleRate/600);
+  const maxLag = Math.min(N-2, Math.ceil(sampleRate/35));
+  const M = N - maxLag;                            // 每個 lag 用固定長度比對，避免偏差
+  const c = new Float32Array(maxLag+1);
+  for(let lag=0; lag<=maxLag; lag++){
+    let sum=0;
+    for(let j=0;j<M;j++) sum += b[j]*b[j+lag];
+    c[lag]=sum;
+  }
+  let d=0;
+  while(d < maxLag && c[d] > c[d+1]) d++;
+  let maxVal=-1, maxPos=-1;
+  for(let i=Math.max(d,minLag); i<=maxLag; i++){ if(c[i]>maxVal){ maxVal=c[i]; maxPos=i; } }
+  if(maxPos<=0) return {freq:-1, rms};
+  // 拋物線插值求更精確的週期
+  let T0 = maxPos;
+  if(maxPos>0 && maxPos<N-1){
+    const x1=c[maxPos-1], x2=c[maxPos], x3=c[maxPos+1];
+    const a=(x1+x3-2*x2)/2, bb=(x3-x1)/2;
+    if(a) T0 = maxPos - bb/(2*a);
+  }
+  const freq = sampleRate / T0;
+  if(freq < 35 || freq > 600) return {freq:-1, rms};  // 吉他/貝斯合理範圍外
+  return {freq, rms};
+}
+
+/* ---------- UI 參照 ---------- */
+const $ = id => document.getElementById(id);
+const noteEl=$('noteName'), freqEl=$('freqLine'), verdictEl=$('verdict'),
+      centsEl=$('centsLine'), badgeEl=$('inTuneBadge'), levelEl=$('levelBar'),
+      startBtn=$('startBtn'), hintEl=$('hint'), stringsEl=$('strings'),
+      gauge=$('gauge'), gtx=gauge.getContext('2d');
+
+function drawGauge(cents, active){
+  const W=gauge.width, H=gauge.height, cx=W/2, cy=H*0.92, R=H*0.78;
+  gtx.clearRect(0,0,W,H);
+  // 刻度弧
+  gtx.lineWidth=3; gtx.strokeStyle='#2e3a47';
+  gtx.beginPath(); gtx.arc(cx,cy,R,Math.PI,2*Math.PI); gtx.stroke();
+  // 綠色準區（±5 cents）
+  gtx.lineWidth=7; gtx.strokeStyle='rgba(61,220,132,.55)';
+  const a0=Math.PI + (45/100)*Math.PI, a1=Math.PI + (55/100)*Math.PI;
+  gtx.beginPath(); gtx.arc(cx,cy,R,a0,a1); gtx.stroke();
+  // 刻度文字
+  gtx.fillStyle='#93a5b5'; gtx.font='600 22px sans-serif'; gtx.textAlign='center';
+  [-50,-25,0,25,50].forEach(cv=>{
+    const a=Math.PI + ((cv+50)/100)*Math.PI;
+    const x=cx+Math.cos(a)*(R-26), y=cy+Math.sin(a)*(R-26)+8;
+    gtx.fillText(cv===0?'0':(cv>0?'+'+cv:''+cv), x, y);
+  });
+  gtx.fillText('♭ 低', cx-R+16, cy-6);
+  gtx.fillText('高 ♯', cx+R-16, cy-6);
+  // 指針
+  if(active && cents!==null){
+    const clamped=Math.max(-50, Math.min(50, cents));
+    const a=Math.PI + ((clamped+50)/100)*Math.PI;
+    const inTune=Math.abs(cents)<=5;
+    gtx.strokeStyle= inTune ? '#3ddc84' : (cents<0 ? '#57b6ff' : '#ff6b6b');
+    gtx.lineWidth=6; gtx.lineCap='round';
+    gtx.beginPath(); gtx.moveTo(cx,cy);
+    gtx.lineTo(cx+Math.cos(a)*(R-8), cy+Math.sin(a)*(R-8)); gtx.stroke();
+  }
+  gtx.fillStyle='#eef3f7';
+  gtx.beginPath(); gtx.arc(cx,cy,9,0,2*Math.PI); gtx.fill();
+}
+drawGauge(null,false);
+
+/* ---------- 弦按鈕 ---------- */
+function buildStrings(){
+  stringsEl.innerHTML='';
+  const t=TUNINGS[currentTuning];
+  stringsEl.style.gridTemplateColumns=`repeat(${t.strings.length},1fr)`;
+  t.strings.forEach((name,i)=>{
+    const midi=noteToMidi(name);
+    const btn=document.createElement('button');
+    btn.className='strBtn'; btn.dataset.idx=i;
+    btn.innerHTML=`<span class="sNote">${name.replace(/\d/,'')}</span>
+                   <span class="sNum">第 ${t.strings.length-i} 弦</span>
+                   <span class="sHz">${midiToFreq(midi).toFixed(1)} Hz</span>`;
+    btn.addEventListener('click',()=>{
+      lockedIdx = (lockedIdx===i)? null : i;
+      refreshStringStates(null,null);
+      if(lockedIdx!==null) playReference(midiToFreq(midi));
+    });
+    stringsEl.appendChild(btn);
+  });
+}
+function refreshStringStates(nearestIdx, tunedIdx){
+  [...stringsEl.children].forEach((el,i)=>{
+    el.classList.toggle('locked', lockedIdx===i);
+    el.classList.toggle('nearest', lockedIdx===null && nearestIdx===i);
+    el.classList.toggle('tuned', tunedIdx===i);
+  });
+}
+const tuningSel=$('tuningSel');
+Object.entries(TUNINGS).forEach(([key,t])=>{
+  const o=document.createElement('option'); o.value=key; o.textContent=t.label; tuningSel.appendChild(o);
+});
+tuningSel.addEventListener('change',()=>{ currentTuning=tuningSel.value; lockedIdx=null; buildStrings(); });
+$('autoBtn').addEventListener('click',e=>{
+  autoString=!autoString;
+  e.target.textContent='自動偵測弦：'+(autoString?'開':'關');
+  if(!autoString) lockedIdx=null;
+  refreshStringStates(null,null);
+});
+
+/* ---------- A4 校準 ---------- */
+$('a4Range').addEventListener('input',e=>{
+  A4=parseInt(e.target.value,10);
+  $('a4Val').textContent=A4+' Hz';
+  buildStrings();
+});
+
+/* ---------- 參考音 ---------- */
+let refOsc=null, refGain=null, refTimer=null;
+function playReference(freq){
+  ensureCtx();
+  stopReference();
+  refOsc=audioCtx.createOscillator(); refGain=audioCtx.createGain();
+  refOsc.type='triangle'; refOsc.frequency.value=freq;
+  const t=audioCtx.currentTime;
+  refGain.gain.setValueAtTime(0,t);
+  refGain.gain.linearRampToValueAtTime(0.25,t+0.02);
+  refGain.gain.exponentialRampToValueAtTime(0.001,t+1.8);
+  refOsc.connect(refGain).connect(audioCtx.destination);
+  refOsc.start(); refOsc.stop(t+1.9);
+  refTimer=setTimeout(()=>{ refOsc=null; },2000);
+}
+function stopReference(){ if(refOsc){ try{refOsc.stop();}catch(e){} refOsc=null; } if(refTimer) clearTimeout(refTimer); }
+
+/* ---------- 主迴圈 ---------- */
+function ensureCtx(){
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended') audioCtx.resume();
+}
+async function toggleListen(){
+  if(listening){ stopListen(); return; }
+  ensureCtx();
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({
+      audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+    });
+  }catch(err){
+    hintEl.textContent='麥克風權限被拒絕：請在瀏覽器設定允許本頁使用麥克風，再按一次開始。';
+    return;
+  }
+  const src=audioCtx.createMediaStreamSource(micStream);
+  analyser=audioCtx.createAnalyser(); analyser.fftSize=4096;
+  src.connect(analyser);
+  listening=true;
+  startBtn.textContent='⏹ 停止'; startBtn.classList.add('listening');
+  hintEl.textContent='聆聽中——一次撥一根弦，讓它自然響完。';
+  loop();
+}
+function stopListen(){
+  listening=false;
+  if(rafId) cancelAnimationFrame(rafId);
+  if(micStream) micStream.getTracks().forEach(t=>t.stop());
+  startBtn.textContent='🎤 開始調音'; startBtn.classList.remove('listening');
+  hintEl.textContent='已停止。聲音只在這支手機上運算，不會上傳。';
+  noteEl.innerHTML='—<span class="oct"></span>';
+  freqEl.textContent='按下開始，撥一根弦';
+  verdictEl.textContent=''; verdictEl.className='';
+  centsEl.textContent='偏差 — cents'; badgeEl.style.display='none';
+  levelEl.style.width='0%'; drawGauge(null,false); refreshStringStates(null,null);
+  smoothedFreq=null;
+}
+startBtn.addEventListener('click',toggleListen);
+
+function loop(){
+  if(!listening) return;
+  rafId=requestAnimationFrame(loop);
+  analyser.getFloatTimeDomainData(buf);
+  const {freq, rms}=autoCorrelate(buf, audioCtx.sampleRate);
+  levelEl.style.width=Math.min(100, rms*320)+'%';
+  const now=performance.now();
+
+  if(freq>0){
+    // 平滑（指數移動平均）＋穩定音名判定，減少跳動
+    smoothedFreq = smoothedFreq? smoothedFreq*0.55 + freq*0.45 : freq;
+    lastValidAt=now;
+    render(smoothedFreq);
+  }else if(now-lastValidAt>900){
+    // 超過 0.9 秒沒訊號 → 淡出顯示
+    smoothedFreq=null; stableNote=null; stableCount=0;
+    verdictEl.textContent=''; badgeEl.style.display='none';
+    drawGauge(null,false);
+  }
+}
+
+function render(freq){
+  const t=TUNINGS[currentTuning];
+  let targetMidi, targetLabel;
+  const nearestMidiFloat=freqToMidi(freq);
+
+  if(lockedIdx!==null){
+    targetMidi=noteToMidi(t.strings[lockedIdx]); targetLabel=t.strings[lockedIdx];
+  }else if(autoString){
+    // 找最接近的一根弦
+    let best=null,bd=1e9;
+    t.strings.forEach((s,i)=>{ const m=noteToMidi(s); const d=Math.abs(m-nearestMidiFloat); if(d<bd){bd=d;best={m,i};} });
+    targetMidi=best.m; targetLabel=t.strings[best.i];
+    if(bd<=1.2) refreshStringStates(best.i, null); else refreshStringStates(null,null);
+  }else{
+    targetMidi=Math.round(nearestMidiFloat); targetLabel=null;
+  }
+
+  const targetFreq=midiToFreq(targetMidi);
+  const cents=1200*Math.log2(freq/targetFreq);
+  const noteName=NOTE_NAMES[((targetMidi%12)+12)%12];
+  const octave=Math.floor(targetMidi/12)-1;
+
+  noteEl.innerHTML=`${noteName}<span class="oct">${octave}</span>`;
+  freqEl.textContent=`${freq.toFixed(1)} Hz　目標 ${targetLabel? targetLabel+'・':''}${targetFreq.toFixed(1)} Hz`;
+  centsEl.textContent=`偏差 ${cents>0?'+':''}${cents.toFixed(0)} cents`;
+
+  const inTune=Math.abs(cents)<=5;
+  if(inTune){
+    verdictEl.textContent='✓ 準了'; verdictEl.className='good';
+    badgeEl.style.display='block';
+    if(lockedIdx!==null) refreshStringStates(null, lockedIdx);
+    else if(autoString){
+      let best=null,bd=1e9;
+      t.strings.forEach((s,i)=>{ const m=noteToMidi(s); const d=Math.abs(m-nearestMidiFloat); if(d<bd){bd=d;best=i;} });
+      if(bd<=1.2) refreshStringStates(null,best);
+    }
+  }else if(cents<0){
+    verdictEl.textContent='♭ 偏低 — 弦鈕往緊轉'; verdictEl.className='flat';
+    badgeEl.style.display='none';
+  }else{
+    verdictEl.textContent='♯ 偏高 — 弦鈕放鬆一點'; verdictEl.className='sharp';
+    badgeEl.style.display='none';
+  }
+  drawGauge(cents,true);
+}
+
+buildStrings();
+
+/* ---------- PWA ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
+</script>
+</body>
+</html>
